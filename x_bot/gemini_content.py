@@ -30,14 +30,15 @@ Write ONE tweet inspired by these topics. Use one of these high-engagement forma
 - A pattern observation: "Every [X] years, developers rediscover [Y] and call it new."
 - A short story opener: "Just spent 3 hours debugging [X]. Turned out to be [Y]. I hate this job."
 - A provocative question that makes devs think
+- A motivational developer truth: something real and grounding that reminds developers why the work matters — earned, not cheesy (e.g. "Shipped my first solo product 3 years ago. 12 users. Still the proudest I've ever been of code.")
 
 Rules:
 - Write like a human developer, NOT a marketing bot or content creator
 - Be specific — use real tech names (Python, Docker, Supabase, React, etc.)
 - NO motivational fluff, NO "In today's fast-paced world", NO "Let's dive in"
 - NO phrases: "game-changer", "revolutionize", "It's important to note", "leverage"
-- Max 1 hashtag, only if it adds value. NEVER truncate hashtag words.
-- Under 280 characters total
+- Max 1-2 hashtags, only if it adds value. NEVER truncate hashtag words.
+- Target 70–150 characters. Never exceed 280. Shorter = more reach.
 - Make it something a developer would actually retweet
 
 Output ONLY the tweet text, nothing else."""
@@ -58,8 +59,8 @@ Pick whichever fits the trending topics. Write ONE tweet that:
 - Ties naturally into the trending topic (e.g. if AI is trending → tie to automation/backups)
 - Includes the product URL
 - Feels like "I use this and it solved X problem" — not an ad
-- Max 1 hashtag, FULL word only, only if it adds value
-- Under 280 characters total
+- Max 1-2 hashtags, FULL word only, only if it adds value
+- Target 70–150 characters. Never exceed 280. Shorter = more reach.
 - NO "check out", "you should try", "game-changer", "revolutionize"
 
 Good example style: "Lost a Supabase DB once. Never again. SupaBackup sends it to Drive automatically — 30 sec setup, free tier. supabackup.com"
