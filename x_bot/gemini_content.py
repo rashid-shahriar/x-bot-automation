@@ -37,7 +37,7 @@ Rules:
 - NO motivational fluff, NO "In today's fast-paced world", NO "Let's dive in"
 - NO phrases: "game-changer", "revolutionize", "It's important to note", "leverage"
 - Max 1 hashtag, only if it adds value. NEVER truncate hashtag words.
-- Under 260 characters total
+- Under 280 characters total
 - Make it something a developer would actually retweet
 
 Output ONLY the tweet text, nothing else."""
@@ -59,7 +59,7 @@ Pick whichever fits the trending topics. Write ONE tweet that:
 - Includes the product URL
 - Feels like "I use this and it solved X problem" — not an ad
 - Max 1 hashtag, FULL word only, only if it adds value
-- Under 260 characters total
+- Under 280 characters total
 - NO "check out", "you should try", "game-changer", "revolutionize"
 
 Good example style: "Lost a Supabase DB once. Never again. SupaBackup sends it to Drive automatically — 30 sec setup, free tier. supabackup.com"
