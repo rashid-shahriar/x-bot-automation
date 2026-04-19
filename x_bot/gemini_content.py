@@ -9,7 +9,7 @@ from typing import Optional
 from google import genai
 from google.genai import errors as genai_errors
 
-from x_bot.image_fetcher import fetch_rss_titles
+from x_bot.image_fetcher import fetch_rss_entries, fetch_rss_titles
 
 logger = logging.getLogger("x-bot")
 
@@ -34,95 +34,100 @@ _FALLBACK_TOPICS = [
     "Prompt engineering is now a core skill for every developer.",
     "Open-source LLMs are closing the gap with proprietary models.",
     "TypeScript adoption keeps growing in large codebases.",
-    "Serverless is no longer experimental — it's the default.",
+    "Serverless is no longer experimental -- it's the default.",
     "The best code is the code you don't have to maintain.",
     "Every developer should learn SQL properly at least once.",
 ]
 
 # --- Prompts ---
 
-_TEXT_PROMPT = """You are @rashid_js_dev — a real software developer who tweets raw, unfiltered thoughts about tech. You sound like a developer venting to friends, not writing content.
+_NEWS_PROMPT = """You are @rashid_js_dev on X -- a developer who shares breaking tech news with quick, sharp reactions.
 
-Here are examples of YOUR voice (study the tone, rhythm, and specificity):
-- "Angular micro-frontends: 10% coding, 90% fighting Module Federation and dependency hell."
-- "Every 5 years, devs rediscover that managing a Postgres HA cluster with Patroni and pgBouncer is a full-time job, then they crawl back to RDS."
-- "The mass adoption of RAG in prod is going to create the same mess as microservices did — everyone bolts it on, nobody understands the retrieval layer, debugging becomes archaeology."
-- "Shipped my first solo product 3 years ago. 12 users. Still the proudest I've ever been of code."
-- "Docker Compose in prod is a rite of passage. You do it once, get burned, then finally learn Kubernetes. Or give up and use Railway."
+Here is a real trending headline:
+Title: {headline}
+Link: {link}
 
-Today's trending tech headlines:
-{topics}
+Create ONE engaging tweet that:
+- Starts with a relevant emoji (fire, rocket, eyes, brain, warning, etc.)
+- Shares the news headline in a natural, conversational way (don't just copy-paste the title)
+- Adds a SHORT developer reaction (1 sentence max) -- your honest take, surprise, or hot opinion
+- Includes the article link at the end
+- Uses 1-2 emojis total (start + optionally one more)
 
-Write ONE tweet inspired by these headlines. Pick a format that fits naturally:
-- A brutally honest observation about a tool/trend
-- A "here's what actually happens" reality check
-- A dev war story (short, specific, funny or painful)
-- A pattern you've noticed in the industry
-- A controversial but defensible opinion
-- Something that would make a developer screenshot and share
+Examples of the style:
+- "🔥 OpenAI just open-sourced their tokenizer. About time. This is going to break half the custom BPE implementations out there. https://link.com"
+- "👀 Vercel acquired a database company. Next.js is slowly becoming an entire cloud platform. https://link.com"
+- "🚀 Rust just hit #2 on TIOBE. C++ devs sweating. https://link.com"
+- "🧠 Google DeepMind says AGI is 3 years away. Again. https://link.com"
+- "⚠️ Major npm supply chain attack -- 50+ packages compromised. Check your lockfiles. https://link.com"
 
-CRITICAL RULES:
-- Sound like a tired, smart developer — not a LinkedIn influencer
-- Be SPECIFIC (name real tools, frameworks, versions, error messages)
-- Short, punchy sentences. No fluff. No filler. Think bar conversation, not blog post.
-- If you use a hashtag, max 1, and only if it genuinely helps discovery
-- 80-200 characters is the sweet spot. NEVER exceed 280.
-- NEVER start with "Unpopular opinion:" or any other cliché opener formula
-- NO: "game-changer", "revolutionize", "leverage", "In today's world", "Let's dive in", "hot take:", "friendly reminder:"
-- Do NOT summarize news. React to it like a human who just read the headline.
+Rules:
+- Keep it under 250 chars (leave room for the link)
+- Sound like a real dev sharing news, not a news bot
+- The reaction should feel genuine -- surprise, skepticism, excitement, or dry humor
+- NO: "game-changer", "revolutionary", "breaking:", "BREAKING:"
+- NO hashtags
 
-Output ONLY the tweet text. Nothing else."""
+Output ONLY the tweet text with the link. Nothing else."""
 
-_PHOTO_PROMPT = """You are @rashid_js_dev — a developer who posts sharp, visual content on X. Your photo tweets feel effortless: a short thought paired with a beautiful image.
+_PHOTO_PROMPT = """You are @rashid_js_dev -- a developer who posts sharp, visual content on X.
 
 Today's trending tech topics:
 {topics}
 
 Write ONE punchy caption (1 line, max 150 chars) that:
+- Starts with a relevant emoji
 - Captures a developer mood or moment (late night coding, deploy anxiety, clean code satisfaction)
 - Is short enough that the IMAGE does the heavy lifting
-- Feels like a text you'd send a dev friend, not a tweet you "crafted"
+- Feels like a text you'd send a dev friend
 - NO hashtags, NO links
 
-Examples of good photo captions:
-- "3 AM. CI is green. I'm afraid to touch anything."
-- "This is what 'just a quick refactor' looks like 6 hours later."
-- "The calm before the deploy."
+Examples:
+- "😴 3 AM. CI is green. I'm afraid to touch anything."
+- "🔥 This is what 'just a quick refactor' looks like 6 hours later."
+- "🫡 The calm before the deploy."
+- "💀 Production logs at 2 AM hit different."
 
-Also give a 2-4 word Pexels search query for a photo that matches the MOOD (not literal) — e.g. "dark office monitors", "calm sunrise desk", "messy cables closeup".
+Also give a 2-4 word Pexels search query for a photo that matches the MOOD (not literal).
 
 Output EXACTLY:
 TWEET: <caption>
 QUERY: <pexels query>"""
 
-_PROMO_PROMPT = """You are @rashid_js_dev. You sometimes mention tools you actually use — but only when it fits what you're already talking about. It should read like a side comment, not a recommendation.
+_PROMO_PROMPT = """You are @rashid_js_dev. You sometimes mention tools you actually use -- but only when it fits naturally.
 
 Today's trending tech headlines:
 {topics}
 
 Work in a mention of ONE of these (pick whichever ties in naturally):
 
-1. Doran Pay (https://doranpay.com) — invoicing tool, PayPal/Stripe, free plan
-2. SupaBackup (https://www.supabackup.com) — auto Supabase backups to Google Drive, free tier
+1. Doran Pay (https://doranpay.com) -- invoicing tool, PayPal/Stripe, free plan
+2. SupaBackup (https://www.supabackup.com) -- auto Supabase backups to Google Drive, free tier
 
-Write ONE tweet where the product mention feels like an afterthought in a larger point. Like:
-- "After my third client 'forgot' to pay, I just set up doranpay.com and stopped chasing. Should've done it months ago."
-- "Supabase is great until you accidentally drop a table in prod. supabackup.com exists for a reason."
+Write ONE tweet where:
+- Start with a relevant emoji
+- The product mention feels like an afterthought in a larger point
+- The tweet works even WITHOUT the product mention
+- Include the URL naturally
+
+Examples:
+- "💸 After my third client 'forgot' to pay, I just set up doranpay.com and stopped chasing. Should've done it months ago."
+- "💀 Supabase is great until you accidentally drop a table in prod. supabackup.com exists for a reason."
+- "🧾 Freelancing tip nobody tells you: automate invoicing on day 1. I use doranpay.com -- free plan, takes 2 minutes."
 
 Rules:
-- The tweet should work even WITHOUT the product mention — the observation is the hook
-- Include the URL naturally (not "check out")
 - 100-220 characters. Never exceed 280.
+- Use 1-2 emojis
 - NO: "check out", "you should try", "game-changer", "highly recommend"
 
 Output ONLY the tweet text. Nothing else."""
 
-# 12-slot cycle: 5 text, 5 photo, 2 promo
+# 12-slot cycle: 8 news, 2 photo, 2 promo
 _CYCLE = [
-    "text", "photo", "text",
-    "text", "promo", "text",
-    "photo", "text", "text",
-    "text", "promo", "photo",
+    "news", "news", "photo",
+    "news", "promo", "news",
+    "news", "photo", "news",
+    "promo", "news", "news",
 ]
 
 
@@ -130,26 +135,58 @@ class GeminiContentSource:
     def __init__(self, gemini_api_key: str) -> None:
         self._client = genai.Client(api_key=gemini_api_key)
         self._count = 0
+        self._used_links: set[str] = set()
 
     def next_post(self) -> PostResult:
         self._count += 1
         kind = _CYCLE[(self._count - 1) % len(_CYCLE)]
 
+        if kind == "news":
+            return self._make_news_post()
+
+        # For photo/promo we still need topic headlines as context
         titles = fetch_rss_titles(_RSS_FEEDS)
         topics = "\n".join(f"- {t}" for t in titles) if titles else "\n".join(f"- {t}" for t in random.sample(_FALLBACK_TOPICS, 4))
 
         if kind == "photo":
-            raw = self._generate(
-                _PHOTO_PROMPT.format(topics=topics)
-            )
+            raw = self._generate(_PHOTO_PROMPT.format(topics=topics))
             return self._parse_photo(raw)
 
-        prompt = _PROMO_PROMPT if kind == "promo" else _TEXT_PROMPT
-        raw = self._generate(prompt.format(topics=topics))
+        # promo
+        raw = self._generate(_PROMO_PROMPT.format(topics=topics))
         text = raw.strip('"').strip("'")
         if len(text) > 280:
             text = text[:280].rsplit(" ", 1)[0]
-        logger.info("Generated %s tweet (%d chars): %s", kind, len(text), text)
+        logger.info("Generated promo tweet (%d chars): %s", len(text), text)
+        return PostResult(text=text)
+
+    def _make_news_post(self) -> PostResult:
+        entries = fetch_rss_entries(_RSS_FEEDS)
+        # Pick a headline we haven't used recently
+        fresh = [e for e in entries if e.link not in self._used_links]
+        if not fresh:
+            self._used_links.clear()
+            fresh = entries
+        if not fresh:
+            # Fallback if RSS is totally down
+            topic = random.choice(_FALLBACK_TOPICS)
+            return PostResult(text=f"🔥 {topic}")
+
+        entry = fresh[0]
+        self._used_links.add(entry.link)
+
+        raw = self._generate(
+            _NEWS_PROMPT.format(headline=entry.title, link=entry.link)
+        )
+        text = raw.strip('"').strip("'")
+        # Ensure the link is in the tweet
+        if entry.link not in text:
+            space_left = 280 - len(text) - 1
+            if space_left >= len(entry.link):
+                text = f"{text} {entry.link}"
+        if len(text) > 280:
+            text = text[:280].rsplit(" ", 1)[0]
+        logger.info("Generated news tweet (%d chars): %s", len(text), text)
         return PostResult(text=text)
 
     def _parse_photo(self, raw: str) -> PostResult:
