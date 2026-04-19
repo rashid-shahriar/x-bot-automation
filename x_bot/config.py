@@ -10,12 +10,12 @@ from dotenv import load_dotenv
 class Settings:
     consumer_key: str
     consumer_secret: str
-    bearer_token: str
     access_token: str
     access_token_secret: str
     gemini_api_key: str
     timezone: str
     posts_per_day: int
+    pexels_access_key: str | None
 
 
 def _required(name: str) -> str:
@@ -35,10 +35,10 @@ def load_settings() -> Settings:
     return Settings(
         consumer_key=_required("X_CONSUMER_KEY"),
         consumer_secret=_required("X_CONSUMER_SECRET"),
-        bearer_token=_required("X_BEARER_TOKEN"),
         access_token=_required("X_ACCESS_TOKEN"),
         access_token_secret=_required("X_ACCESS_TOKEN_SECRET"),
         gemini_api_key=_required("GEMINI_API_KEY"),
         timezone=os.getenv("TIMEZONE", "UTC"),
         posts_per_day=posts_per_day,
+        pexels_access_key=os.getenv("PEXELS_ACCESS_KEY") or None,
     )

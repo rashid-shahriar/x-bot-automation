@@ -8,6 +8,7 @@ from apscheduler.triggers.date import DateTrigger
 
 from x_bot.config import load_settings
 from x_bot.gemini_content import GeminiContentSource
+from x_bot.image_fetcher import fetch_pexels_image
 from x_bot.x_client import XClient
 
 logging.basicConfig(
@@ -51,7 +52,6 @@ def main() -> None:
     x_client = XClient(
         consumer_key=settings.consumer_key,
         consumer_secret=settings.consumer_secret,
-        bearer_token=settings.bearer_token,
         access_token=settings.access_token,
         access_token_secret=settings.access_token_secret,
     )
@@ -63,8 +63,16 @@ def main() -> None:
     scheduler = BlockingScheduler(timezone=settings.timezone)
 
     def post_job() -> None:
-        text = content_source.next_post()
-        tweet_id = x_client.post_text(text)
+        result = content_source.next_post()
+        if result.pexels_query and settings.pexels_access_key:
+            try:
+                image_bytes = fetch_pexels_image(result.pexels_query, settings.pexels_access_key)
+                tweet_id = x_client.post_with_image(result.text, image_bytes)
+                logger.info("Posted photo tweet %s (query=%r)", tweet_id, result.pexels_query)
+                return
+            except Exception:
+                logger.exception("Photo post failed, falling back to text-only")
+        tweet_id = x_client.post_text(result.text)
         logger.info("Posted tweet %s", tweet_id)
 
     logger.info("Posting first tweet immediately...")

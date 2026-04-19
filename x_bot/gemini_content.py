@@ -3,71 +3,30 @@ from __future__ import annotations
 import logging
 import random
 import time
+from dataclasses import dataclass
+from typing import Optional
 
-import feedparser
 from google import genai
 from google.genai import errors as genai_errors
 
+from x_bot.image_fetcher import fetch_rss_titles
+
 logger = logging.getLogger("x-bot")
 
+
+@dataclass
+class PostResult:
+    text: str
+    pexels_query: Optional[str] = None
+
+
 _RSS_FEEDS = [
-    "https://hnrss.org/frontpage",           # Hacker News front page
-    "https://dev.to/feed/tag/programming",   # DEV.to programming
-    "https://dev.to/feed/tag/ai",            # DEV.to AI
-    "https://dev.to/feed/tag/webdev",        # DEV.to webdev
-    "https://dev.to/feed/tag/devops",        # DEV.to devops
+    "https://hnrss.org/frontpage",
+    "https://dev.to/feed/tag/programming",
+    "https://dev.to/feed/tag/ai",
+    "https://dev.to/feed/tag/webdev",
+    "https://dev.to/feed/tag/devops",
 ]
-
-_PROMPT_TEMPLATE = """You are a senior software engineer who tweets casually about tech. Your tweets get high engagement because they're opinionated, specific, and feel like something a real developer would say — not a content creator.
-
-Today's trending tech headlines for inspiration:
-{trending_topics}
-
-Write ONE tweet inspired by these topics. Use one of these high-engagement formats (pick randomly):
-- A hot take: "Unpopular opinion: [specific dev opinion]"
-- A hard truth: "[something developers avoid admitting] and we all know it."
-- A practical insight: "One thing I wish I knew earlier: [specific tip]"
-- A pattern observation: "Every [X] years, developers rediscover [Y] and call it new."
-- A short story opener: "Just spent 3 hours debugging [X]. Turned out to be [Y]. I hate this job."
-- A provocative question that makes devs think
-- A motivational developer truth: something real and grounding that reminds developers why the work matters — earned, not cheesy (e.g. "Shipped my first solo product 3 years ago. 12 users. Still the proudest I've ever been of code.")
-
-Rules:
-- Write like a human developer, NOT a marketing bot or content creator
-- Be specific — use real tech names (Python, Docker, Supabase, React, etc.)
-- NO motivational fluff, NO "In today's fast-paced world", NO "Let's dive in"
-- NO phrases: "game-changer", "revolutionize", "It's important to note", "leverage"
-- Max 1-2 hashtags, only if it adds value. NEVER truncate hashtag words.
-- Target 70–150 characters. Never exceed 280. Shorter = more reach.
-- Make it something a developer would actually retweet
-
-Output ONLY the tweet text, nothing else."""
-
-_PROMO_PROMPT_TEMPLATE = """You are a senior software engineer who tweets honestly about tools you use. You occasionally mention products you like — but only when it genuinely fits the conversation.
-
-Today's trending tech headlines:
-{trending_topics}
-
-Naturally work in a mention of ONE of these products:
-
-1. Doran Pay (https://doranpay.com) — Invoicing for freelancers/businesses. Create, send, track invoices. PayPal/Stripe built-in. Free plan. Great if you're tired of chasing payments.
-
-2. SupaBackup (https://www.supabackup.com) — Auto-backups for your Supabase database to Google Drive. 30-second setup, free tier. The kind of thing you set up AFTER losing data once.
-
-Pick whichever fits the trending topics. Write ONE tweet that:
-- Sounds like a personal recommendation from a developer who actually uses it
-- Ties naturally into the trending topic (e.g. if AI is trending → tie to automation/backups)
-- Includes the product URL
-- Feels like "I use this and it solved X problem" — not an ad
-- Max 1-2 hashtags, FULL word only, only if it adds value
-- Target 70–150 characters. Never exceed 280. Shorter = more reach.
-- NO "check out", "you should try", "game-changer", "revolutionize"
-
-Good example style: "Lost a Supabase DB once. Never again. SupaBackup sends it to Drive automatically — 30 sec setup, free tier. supabackup.com"
-
-Output ONLY the tweet text, nothing else."""
-
-_PROMO_EVERY_N = 4  # every 4th post is a product promo
 
 _FALLBACK_TOPICS = [
     "The pace of AI advancements in 2026 has been staggering.",
@@ -80,66 +39,147 @@ _FALLBACK_TOPICS = [
     "Every developer should learn SQL properly at least once.",
 ]
 
+# --- Prompts ---
+
+_TEXT_PROMPT = """You are @rashid_js_dev — a real software developer who tweets raw, unfiltered thoughts about tech. You sound like a developer venting to friends, not writing content.
+
+Here are examples of YOUR voice (study the tone, rhythm, and specificity):
+- "Angular micro-frontends: 10% coding, 90% fighting Module Federation and dependency hell."
+- "Every 5 years, devs rediscover that managing a Postgres HA cluster with Patroni and pgBouncer is a full-time job, then they crawl back to RDS."
+- "The mass adoption of RAG in prod is going to create the same mess as microservices did — everyone bolts it on, nobody understands the retrieval layer, debugging becomes archaeology."
+- "Shipped my first solo product 3 years ago. 12 users. Still the proudest I've ever been of code."
+- "Docker Compose in prod is a rite of passage. You do it once, get burned, then finally learn Kubernetes. Or give up and use Railway."
+
+Today's trending tech headlines:
+{topics}
+
+Write ONE tweet inspired by these headlines. Pick a format that fits naturally:
+- A brutally honest observation about a tool/trend
+- A "here's what actually happens" reality check
+- A dev war story (short, specific, funny or painful)
+- A pattern you've noticed in the industry
+- A controversial but defensible opinion
+- Something that would make a developer screenshot and share
+
+CRITICAL RULES:
+- Sound like a tired, smart developer — not a LinkedIn influencer
+- Be SPECIFIC (name real tools, frameworks, versions, error messages)
+- Short, punchy sentences. No fluff. No filler. Think bar conversation, not blog post.
+- If you use a hashtag, max 1, and only if it genuinely helps discovery
+- 80-200 characters is the sweet spot. NEVER exceed 280.
+- NEVER start with "Unpopular opinion:" or any other cliché opener formula
+- NO: "game-changer", "revolutionize", "leverage", "In today's world", "Let's dive in", "hot take:", "friendly reminder:"
+- Do NOT summarize news. React to it like a human who just read the headline.
+
+Output ONLY the tweet text. Nothing else."""
+
+_PHOTO_PROMPT = """You are @rashid_js_dev — a developer who posts sharp, visual content on X. Your photo tweets feel effortless: a short thought paired with a beautiful image.
+
+Today's trending tech topics:
+{topics}
+
+Write ONE punchy caption (1 line, max 150 chars) that:
+- Captures a developer mood or moment (late night coding, deploy anxiety, clean code satisfaction)
+- Is short enough that the IMAGE does the heavy lifting
+- Feels like a text you'd send a dev friend, not a tweet you "crafted"
+- NO hashtags, NO links
+
+Examples of good photo captions:
+- "3 AM. CI is green. I'm afraid to touch anything."
+- "This is what 'just a quick refactor' looks like 6 hours later."
+- "The calm before the deploy."
+
+Also give a 2-4 word Pexels search query for a photo that matches the MOOD (not literal) — e.g. "dark office monitors", "calm sunrise desk", "messy cables closeup".
+
+Output EXACTLY:
+TWEET: <caption>
+QUERY: <pexels query>"""
+
+_PROMO_PROMPT = """You are @rashid_js_dev. You sometimes mention tools you actually use — but only when it fits what you're already talking about. It should read like a side comment, not a recommendation.
+
+Today's trending tech headlines:
+{topics}
+
+Work in a mention of ONE of these (pick whichever ties in naturally):
+
+1. Doran Pay (https://doranpay.com) — invoicing tool, PayPal/Stripe, free plan
+2. SupaBackup (https://www.supabackup.com) — auto Supabase backups to Google Drive, free tier
+
+Write ONE tweet where the product mention feels like an afterthought in a larger point. Like:
+- "After my third client 'forgot' to pay, I just set up doranpay.com and stopped chasing. Should've done it months ago."
+- "Supabase is great until you accidentally drop a table in prod. supabackup.com exists for a reason."
+
+Rules:
+- The tweet should work even WITHOUT the product mention — the observation is the hook
+- Include the URL naturally (not "check out")
+- 100-220 characters. Never exceed 280.
+- NO: "check out", "you should try", "game-changer", "highly recommend"
+
+Output ONLY the tweet text. Nothing else."""
+
+# 12-slot cycle: 5 text, 5 photo, 2 promo
+_CYCLE = [
+    "text", "photo", "text",
+    "text", "promo", "text",
+    "photo", "text", "text",
+    "text", "promo", "photo",
+]
+
 
 class GeminiContentSource:
     def __init__(self, gemini_api_key: str) -> None:
-        self._genai_client = genai.Client(api_key=gemini_api_key)
-        self._post_count = 0
+        self._client = genai.Client(api_key=gemini_api_key)
+        self._count = 0
 
-    def _fetch_trending_topics(self) -> list[str]:
-        titles: list[str] = []
-        for url in _RSS_FEEDS:
-            try:
-                feed = feedparser.parse(url)
-                titles += [e.title for e in feed.entries[:4] if e.get("title")]
-            except Exception:
-                logger.warning("Failed to fetch RSS feed: %s", url)
-        if not titles:
-            return []
-        random.shuffle(titles)
-        return titles[:6]
+    def next_post(self) -> PostResult:
+        self._count += 1
+        kind = _CYCLE[(self._count - 1) % len(_CYCLE)]
 
-    def next_post(self) -> str:
-        self._post_count += 1
-        is_promo = self._post_count % _PROMO_EVERY_N == 0
+        titles = fetch_rss_titles(_RSS_FEEDS)
+        topics = "\n".join(f"- {t}" for t in titles) if titles else "\n".join(f"- {t}" for t in random.sample(_FALLBACK_TOPICS, 4))
 
-        topics = self._fetch_trending_topics()
-        if not topics:
-            logger.warning("All RSS feeds failed, using fallback topics.")
-            topics = random.sample(_FALLBACK_TOPICS, 4)
+        if kind == "photo":
+            raw = self._generate(
+                _PHOTO_PROMPT.format(topics=topics)
+            )
+            return self._parse_photo(raw)
 
-        bullet_list = "\n".join(f"- {t}" for t in topics)
-        prompt = (
-            _PROMO_PROMPT_TEMPLATE.format(trending_topics=bullet_list)
-            if is_promo
-            else _PROMPT_TEMPLATE.format(trending_topics=bullet_list)
-        )
-
-        response = self._generate_with_retry(prompt)
-        text = response.text.strip().strip('"').strip("'")
-
+        prompt = _PROMO_PROMPT if kind == "promo" else _TEXT_PROMPT
+        raw = self._generate(prompt.format(topics=topics))
+        text = raw.strip('"').strip("'")
         if len(text) > 280:
             text = text[:280].rsplit(" ", 1)[0]
-
-        kind = "promo" if is_promo else "regular"
         logger.info("Generated %s tweet (%d chars): %s", kind, len(text), text)
-        return text
+        return PostResult(text=text)
 
-    def _generate_with_retry(self, prompt: str, max_retries: int = 4):
+    def _parse_photo(self, raw: str) -> PostResult:
+        text = query = ""
+        for line in raw.splitlines():
+            if line.startswith("TWEET:"):
+                text = line[6:].strip().strip('"').strip("'")
+            elif line.startswith("QUERY:"):
+                query = line[6:].strip()
+        if not text:
+            text = raw.strip('"').strip("'")
+        if len(text) > 280:
+            text = text[:280].rsplit(" ", 1)[0]
+        logger.info("Generated photo tweet (%d chars) query=%r: %s", len(text), query, text)
+        return PostResult(text=text, pexels_query=query or None)
+
+    def _generate(self, prompt: str) -> str:
         delay = 20
-        for attempt in range(max_retries):
+        for attempt in range(4):
             try:
-                return self._genai_client.models.generate_content(
-                    model="gemini-flash-latest",
-                    contents=prompt,
+                resp = self._client.models.generate_content(
+                    model="gemini-flash-latest", contents=prompt,
                 )
+                return resp.text.strip()
             except (genai_errors.ClientError, genai_errors.ServerError) as exc:
-                retryable = (
-                    isinstance(exc, genai_errors.ServerError)
-                    or (isinstance(exc, genai_errors.ClientError) and exc.status_code == 429)
+                retryable = isinstance(exc, genai_errors.ServerError) or (
+                    isinstance(exc, genai_errors.ClientError) and exc.status_code == 429
                 )
-                if retryable and attempt < max_retries - 1:
-                    logger.warning("Gemini unavailable, retrying in %ds (attempt %d/%d)...", delay, attempt + 1, max_retries)
+                if retryable and attempt < 3:
+                    logger.warning("Gemini retry in %ds (%d/4)", delay, attempt + 1)
                     time.sleep(delay)
                     delay *= 2
                 else:
